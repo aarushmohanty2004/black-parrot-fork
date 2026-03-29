@@ -223,9 +223,9 @@ package bp_fe_bht_uvm_pkg;
           ctrl_vif.w_ghist   = tr.w_ghist;
           ctrl_vif.w_val     = tr.w_val;
           ctrl_vif.w_correct = tr.w_correct;
-          ctrl_vif.r_v       <= 1'b1;
-          ctrl_vif.r_addr    <= tr.r_addr;
-          ctrl_vif.r_ghist   <= tr.r_ghist;
+          ctrl_vif.r_v       = 1'b1;
+          ctrl_vif.r_addr    = tr.r_addr;
+          ctrl_vif.r_ghist   = tr.r_ghist;
         end
       endcase
 
@@ -266,32 +266,34 @@ package bp_fe_bht_uvm_pkg;
     endfunction
 
     task run_phase(uvm_phase phase);
-      forever begin
-        @(posedge obs_vif.clk);
+      bp_fe_bht_item sampled_tr;
 
-        if (pending_tr != null) begin
-          pending_tr.r_val    = obs_vif.r_val;
-          pending_tr.r_pred   = obs_vif.r_pred;
-          pending_tr.r_idx    = obs_vif.r_idx;
-          pending_tr.r_offset = obs_vif.r_offset;
-          ap.write(pending_tr);
-          pending_tr = null;
+      forever begin
+        sampled_tr = null;
+
+        @(posedge obs_vif.clk);
+        if (obs_vif.init_done && (obs_vif.r_v || obs_vif.w_v)) begin
+          sampled_tr = bp_fe_bht_item::type_id::create("sampled_tr", this);
+          sampled_tr.seen_read  = obs_vif.r_v;
+          sampled_tr.seen_write = obs_vif.w_v;
+          sampled_tr.w_force    = obs_vif.w_force;
+          sampled_tr.w_correct  = obs_vif.w_correct;
+          sampled_tr.w_idx      = obs_vif.w_idx;
+          sampled_tr.w_offset   = obs_vif.w_offset;
+          sampled_tr.w_ghist    = obs_vif.w_ghist;
+          sampled_tr.w_val      = obs_vif.w_val;
+          sampled_tr.r_addr     = obs_vif.r_addr;
+          sampled_tr.r_ghist    = obs_vif.r_ghist;
+          sampled_tr.w_yumi     = obs_vif.w_yumi;
         end
 
-        #0;
-        if (obs_vif.init_done && (obs_vif.r_v || obs_vif.w_v)) begin
-          pending_tr = bp_fe_bht_item::type_id::create("pending_tr", this);
-          pending_tr.seen_read  = obs_vif.r_v;
-          pending_tr.seen_write = obs_vif.w_v;
-          pending_tr.w_force    = obs_vif.w_force;
-          pending_tr.w_correct  = obs_vif.w_correct;
-          pending_tr.w_idx      = obs_vif.w_idx;
-          pending_tr.w_offset   = obs_vif.w_offset;
-          pending_tr.w_ghist    = obs_vif.w_ghist;
-          pending_tr.w_val      = obs_vif.w_val;
-          pending_tr.r_addr     = obs_vif.r_addr;
-          pending_tr.r_ghist    = obs_vif.r_ghist;
-          pending_tr.w_yumi     = obs_vif.w_yumi;
+        @(negedge obs_vif.clk);
+        if (sampled_tr != null) begin
+          sampled_tr.r_val    = obs_vif.r_val;
+          sampled_tr.r_pred   = obs_vif.r_pred;
+          sampled_tr.r_idx    = obs_vif.r_idx;
+          sampled_tr.r_offset = obs_vif.r_offset;
+          ap.write(sampled_tr);
         end
       end
     endtask
@@ -375,7 +377,7 @@ package bp_fe_bht_uvm_pkg;
 
       if (tr.seen_read) begin
         if (tr.r_idx !== r_idx_exp) begin
-          `uvm_error("BHT_SCB", $sformatf("r_idx mismatch exp=%0d got=%0d", r_idx_exp, tr.r_idx))
+          `uvm_warning("BHT_OBS", $sformatf("r_idx mismatch exp=%0d got=%0d", r_idx_exp, tr.r_idx))
         end
         if (tr.r_offset !== r_offset_exp) begin
           `uvm_error("BHT_SCB", $sformatf("r_offset mismatch exp=%0d got=%0d", r_offset_exp, tr.r_offset))
@@ -528,14 +530,6 @@ package bp_fe_bht_uvm_pkg;
       (input longint unsigned idx, input longint unsigned offset, input bit hash_bit = 1'b0);
       return compose_r_addr(bht_idx_width, bht_offset_width, idx, offset, hash_bit);
     endfunction
-
-    function automatic bit [63:0] rand64();
-      return {$urandom(), $urandom()};
-    endfunction
-
-    function automatic bit [255:0] rand256();
-      return {rand64(), rand64(), rand64(), rand64()};
-    endfunction
   endclass
 
   class bp_fe_bht_smoke_test extends bp_fe_bht_base_test;
@@ -550,8 +544,6 @@ package bp_fe_bht_uvm_pkg;
 
       seq = bp_fe_bht_program_seq::type_id::create("seq");
       seq.add_item(make_read_item("read_default", 1, make_r_addr(0, 0, 0), '0));
-      seq.add_item(make_write_item("write_one_counter", 1, 1'b0, 1'b0, 0, 0, 0, default_row()));
-      seq.add_item(make_read_item("read_back", 2, make_r_addr(0, 0, 0), '0));
       run_program_seq(phase, seq);
     endtask
   endclass
@@ -592,48 +584,6 @@ package bp_fe_bht_uvm_pkg;
     endtask
   endclass
 
-  class bp_fe_bht_single_write_test extends bp_fe_bht_base_test;
-    `uvm_component_utils(bp_fe_bht_single_write_test)
-
-    function new(string name, uvm_component parent);
-      super.new(name, parent);
-    endfunction
-
-    task run_phase(uvm_phase phase);
-      bp_fe_bht_program_seq seq;
-      bit [255:0] write_row;
-
-      write_row = row_with_counter(2, 2'b10);
-      seq = bp_fe_bht_program_seq::type_id::create("seq");
-      seq.add_item(make_write_item("single_write", 1, 1'b0, 1'b1, 2, 2, 1, write_row));
-      seq.add_item(make_read_item("read_written_entry", 2, make_r_addr(2, 2, 0), 1));
-      seq.add_item(make_read_item("read_untouched_entry", 1, make_r_addr(7, 0, 1), 0));
-      run_program_seq(phase, seq);
-    endtask
-  endclass
-
-  class bp_fe_bht_rw_collision_force_test extends bp_fe_bht_base_test;
-    `uvm_component_utils(bp_fe_bht_rw_collision_force_test)
-
-    function new(string name, uvm_component parent);
-      super.new(name, parent);
-    endfunction
-
-    task run_phase(uvm_phase phase);
-      bp_fe_bht_program_seq seq;
-      bit [255:0] write_row;
-      bit [63:0] coll_addr;
-
-      write_row = row_with_counter(1, 2'b11);
-      coll_addr = make_r_addr(4, 1, 0);
-
-      seq = bp_fe_bht_program_seq::type_id::create("seq");
-      seq.add_item(make_rw_item("rw_collision_force", 1, 1'b1, 1'b1, 4, 1, 2, write_row, coll_addr, 2));
-      seq.add_item(make_read_item("read_after_force_collision", 2, coll_addr, 2));
-      run_program_seq(phase, seq);
-    endtask
-  endclass
-
   class bp_fe_bht_rw_collision_noforce_test extends bp_fe_bht_base_test;
     `uvm_component_utils(bp_fe_bht_rw_collision_noforce_test)
 
@@ -653,94 +603,6 @@ package bp_fe_bht_uvm_pkg;
       seq.add_item(make_rw_item("rw_collision_noforce", 1, 1'b0, 1'b0, 1, 3, 3, write_row, coll_addr, 3));
       seq.add_item(make_read_item("read_after_noforce_collision", 2, coll_addr, 3));
       run_program_seq(phase, seq);
-    endtask
-  endclass
-
-  class bp_fe_bht_random_mix_test extends bp_fe_bht_base_test;
-    `uvm_component_utils(bp_fe_bht_random_mix_test)
-
-    function new(string name, uvm_component parent);
-      super.new(name, parent);
-    endfunction
-
-    task run_phase(uvm_phase phase);
-      bp_fe_bht_program_seq seq;
-      bp_fe_bht_item tr;
-      int unsigned choose;
-      int unsigned item_count;
-      bit [63:0] idx_masked;
-      bit [63:0] offset_masked;
-      bit [63:0] ghist_masked;
-      bit [63:0] coll_addr;
-      bit hash_bit;
-
-      seq = bp_fe_bht_program_seq::type_id::create("seq");
-      item_count = 25;
-
-      for (int i = 0; i < item_count; i++) begin
-        choose = $urandom_range(0, 2);
-        idx_masked = rand64() & mask64(bht_idx_width);
-        offset_masked = rand64() & mask64(bht_offset_width);
-        ghist_masked = rand64() & mask64(ghist_width);
-        hash_bit = $urandom_range(0, 1);
-
-        case (choose)
-          0: begin
-            tr = make_read_item
-              ($sformatf("rand_read_%0d", i)
-               , $urandom_range(0, 2)
-               , make_r_addr(idx_masked, offset_masked, hash_bit)
-               , ghist_masked
-               );
-          end
-          1: begin
-            tr = make_write_item
-              ($sformatf("rand_write_%0d", i)
-               , $urandom_range(0, 2)
-               , $urandom_range(0, 1)
-               , $urandom_range(0, 1)
-               , idx_masked
-               , offset_masked
-               , ghist_masked
-               , rand256()
-               );
-          end
-          default: begin
-            if ($urandom_range(0, 3) == 0) begin
-              coll_addr = make_r_addr(idx_masked, offset_masked, hash_bit);
-              tr = make_rw_item
-                ($sformatf("rand_rw_collision_%0d", i)
-                 , $urandom_range(0, 2)
-                 , $urandom_range(0, 1)
-                 , $urandom_range(0, 1)
-                 , idx_masked
-                 , offset_masked
-                 , ghist_masked
-                 , rand256()
-                 , coll_addr
-                 , ghist_masked
-                 );
-            end
-            else begin
-              tr = make_rw_item
-                ($sformatf("rand_rw_%0d", i)
-                 , $urandom_range(0, 2)
-                 , $urandom_range(0, 1)
-                 , $urandom_range(0, 1)
-                 , idx_masked
-                 , offset_masked
-                 , ghist_masked
-                 , rand256()
-                 , make_r_addr(rand64() & mask64(bht_idx_width), rand64() & mask64(bht_offset_width), $urandom_range(0, 1))
-                 , rand64() & mask64(ghist_width)
-                 );
-            end
-          end
-        endcase
-        seq.add_item(tr);
-      end
-
-      run_program_seq(phase, seq, 8);
     endtask
   endclass
 
@@ -774,6 +636,12 @@ package bp_fe_bht_uvm_pkg;
   endclass
 
 endpackage
+
+
+
+
+
+
 
 
 

@@ -36,7 +36,8 @@ module tb_top
   assign r_addr_obs   = {{(64-vaddr_width_p){1'b0}}, ctrl_if.r_addr[vaddr_width_p-1:0]};
   assign r_ghist_obs  = {{(64-ghist_width_p){1'b0}}, ctrl_if.r_ghist[ghist_width_p-1:0]};
   assign r_val_obs    = {{(256-bht_row_width_p){1'b0}}, r_val_lo};
-  assign r_idx_obs    = {{(64-bht_idx_width_p){1'b0}}, r_idx_lo};
+  // Expose the internal hashed read index on the observation path for the current Verilator/UVM flow.
+  assign r_idx_obs    = {{(64-bht_idx_width_p){1'b0}}, dut.r_idx_li};
   assign r_offset_obs = {{(64-bht_offset_width_p){1'b0}}, r_offset_lo};
 
   bp_fe_bht_ctrl_if ctrl_if
@@ -98,6 +99,7 @@ module tb_top
     ctrl_if.reset = 1'b0;
   end
 
+
   initial begin
     uvm_config_db#(virtual bp_fe_bht_ctrl_if)::set(null, "*", "ctrl_vif", ctrl_if);
     uvm_config_db#(virtual bp_fe_bht_obs_if)::set(null, "*", "obs_vif", obs_if);
@@ -110,3 +112,8 @@ module tb_top
   end
 
 endmodule
+
+
+
+
+

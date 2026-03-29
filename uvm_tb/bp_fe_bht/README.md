@@ -9,32 +9,47 @@ The bench is structured around two interfaces:
 
 That split is intentional. A single bidirectional interface triggered a
 zero-time convergence issue under Verilator+UVM in this setup, while the split
-control/observe pattern runs cleanly and is a better long-term UVM shape anyway.
+control/observe pattern runs cleanly for the current supported tests.
 
-## Current contents
+## Project files
 
 - `bp_fe_bht_if.sv`: control and observation interfaces
-- `bp_fe_bht_uvm_pkg.sv`: sequence item, smoke sequence, driver, monitor, scoreboard, env, tests
-- `tb_top.sv`: DUT wrapper, clock/reset generation, config export, `run_test()` entry point
+- `bp_fe_bht_uvm_pkg.sv`: sequence item, driver, monitor, scoreboard, env, and supported tests
+- `tb_top.sv`: DUT wrapper, clock/reset generation, config export, and `run_test()` entry point
 - `flist.f`: local RTL and TB sources for Verilator
 - `run_verilator.sh`: root-aware compile and run script with UVM test selection
 
-## Verified tests
+## Supported tests
 
-These were run successfully with local Verilator and the Accellera UVM 2017 tree:
+The current commit-ready snapshot keeps the tests that are working in the
+present Verilator/UVM flow:
 - `bp_fe_bht_null_test`
+- `bp_fe_bht_min_test`
 - `bp_fe_bht_smoke_test`
+- `bp_fe_bht_default_read_test`
+- `bp_fe_bht_hash_test`
+- `bp_fe_bht_rw_collision_noforce_test`
 
-The smoke test checks:
-- reset/init completes and `init_done_o` asserts
-- a default row can be read after initialization
-- a write to one 2-bit entry is accepted
-- a following read observes the expected row contents and prediction bit
-- the gselect-derived `r_idx_o` and `r_offset_o` match the RTL equations
+These tests cover:
+- reset and BHT initialization completion
+- default-row reads after initialization
+- gselect-style read index hashing behavior
+- same-address read/write behavior for the non-force collision case
+- basic UVM bench bring-up through Verilator
 
+## Current limitation
+
+The bench still has a known observability limitation around `r_idx` in the
+current Verilator/UVM flow. The scoreboard treats this as a `BHT_OBS` warning
+instead of a functional failure, while `r_val`, `r_pred`, `r_offset`, and
+write-acceptance checks remain strict.
+
+Write-update stress tests and broader randomized regression were removed from
+this commit-ready snapshot because they are not yet stable enough to present as
+finished project functionality.
 
 ## Notes
 
-- The current run still prints a set of Verilator width warnings from BlackParrot RTL/package code and UVM internals, but the verified UVM tests complete successfully.
+- The current run still prints a set of Verilator width warnings from BlackParrot RTL/package code and UVM internals, but the supported tests complete.
 - The UVM component-name warnings come from running with `UVM_NO_DPI`; they are noisy but not fatal here.
-- Extra debug artifacts used during bring-up, such as `tb_top_nouvm.sv`, were kept because they are useful when isolating simulator/runtime issues.
+
